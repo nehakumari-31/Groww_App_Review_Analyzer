@@ -1,0 +1,257 @@
+{
+    "name": "Groww Review Analyzer - Native (Final)",
+    "nodes": [
+        {
+            "parameters": {
+                "rule": {
+                    "interval": [
+                        {
+                            "field": "cronExpression",
+                            "expression": "0 9 * * 1"
+                        }
+                    ]
+                }
+            },
+            "name": "Weekly Trigger",
+            "type": "n8n-nodes-base.scheduleTrigger",
+            "typeVersion": 1,
+            "position": [
+                100,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "values": {
+                    "string": [
+                        {
+                            "name": "GROQ_API_KEY",
+                            "value": "your_api_key_here"
+                        },
+                        {
+                            "name": "GMAIL_USER",
+                            "value": "your_email@gmail.com"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "name": "Set Credentials",
+            "type": "n8n-nodes-base.set",
+            "typeVersion": 1,
+            "position": [
+                300,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "fileSelector": "/Users/neha/Desktop/Groww_App_Review_Analyzer/data/processed/groww_reviews_processed.csv"
+            },
+            "name": "Read Processed Reviews",
+            "type": "n8n-nodes-base.readBinaryFile",
+            "typeVersion": 1,
+            "position": [
+                500,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "options": {
+                    "headerRow": true
+                }
+            },
+            "name": "Extract CSV",
+            "type": "n8n-nodes-base.extractFromFile",
+            "typeVersion": 1,
+            "position": [
+                700,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "return $input.all().map(item => {\n  const keywords = {\n    onboarding: ['login', 'signup', 'register', 'verification', 'otp'],\n    kyc: ['kyc', 'document', 'pan', 'aadhaar', 'status'],\n    payments: ['deposit', 'add money', 'payment', 'upi', 'bank'],\n    statements: ['statement', 'report', 'ledger', 'history'],\n    withdrawals: ['withdraw', 'payout', 'bank transfer', 'refund']\n  };\n\n  let theme = 'others';\n  const text = (item.json.review_text || '').toLowerCase();\n  for (const [key, list] of Object.entries(keywords)) {\n    if (list.some(word => text.includes(word))) {\n      theme = key;\n      break;\n    }\n  }\n  return { json: { ...item.json, pre_theme: theme } };\n});"
+            },
+            "name": "Keyword Pre-classify",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 1,
+            "position": [
+                900,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://api.groq.com/openai/v1/chat/completions",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Authorization",
+                            "value": "==Bearer {{$node[\"Set Credentials\"].json[\"GROQ_API_KEY\"]}}"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={\n  \"model\": \"llama3-70b-8192\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Classify this app review into exactly ONE theme: onboarding, kyc, payments, statements, withdrawals, others. Review: \\\"{{$json[\"review_text\"]}}\\\". Return ONLY the theme name in lowercase.\"\n    }\n  ],\n  \"temperature\": 0,\n  \"max_tokens\": 10\n}",
+                "options": {}
+            },
+            "name": "Groq: Classify Theme",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.1,
+            "position": [
+                1100,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const results = $input.all();\nconst reviews = results.map(item => item.json.review_text).join('\\n- ');\nreturn [{ json: { all_reviews: reviews } }];"
+            },
+            "name": "Aggregate All Reviews",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 1,
+            "position": [
+                1300,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://api.groq.com/openai/v1/chat/completions",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Authorization",
+                            "value": "==Bearer {{$node[\"Set Credentials\"].json[\"GROQ_API_KEY\"]}}"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={\n  \"model\": \"llama3-70b-8192\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Analyze these app reviews for 'Groww' and generate a concise 'Review Pulse' report. Include 3 main themes, 3 critical quotes (anonymized), and 3 actionable ideas. Format your response for a professional executive email.\\n\\nReviews:\\n{{$json[\"all_reviews\"]}}\"\n    }\n  ],\n  \"temperature\": 0.7\n}",
+                "options": {}
+            },
+            "name": "Groq: Generate Executive Pulse",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.1,
+            "position": [
+                1500,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "resource": "message",
+                "operation": "send",
+                "to": "={{$node[\"Set Credentials\"].json[\"GMAIL_USER\"]}}",
+                "subject": "Weekly Groww Review Pulse",
+                "text": "={{$json[\"choices\"][0][\"message\"][\"content\"]}}",
+                "options": {}
+            },
+            "name": "Send Email",
+            "type": "n8n-nodes-base.gmail",
+            "typeVersion": 2.1,
+            "position": [
+                1700,
+                300
+            ]
+        }
+    ],
+    "connections": {
+        "Weekly Trigger": {
+            "main": [
+                [
+                    {
+                        "node": "Set Credentials",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Set Credentials": {
+            "main": [
+                [
+                    {
+                        "node": "Read Processed Reviews",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Read Processed Reviews": {
+            "main": [
+                [
+                    {
+                        "node": "Extract CSV",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Extract CSV": {
+            "main": [
+                [
+                    {
+                        "node": "Keyword Pre-classify",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Keyword Pre-classify": {
+            "main": [
+                [
+                    {
+                        "node": "Groq: Classify Theme",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Groq: Classify Theme": {
+            "main": [
+                [
+                    {
+                        "node": "Aggregate All Reviews",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Aggregate All Reviews": {
+            "main": [
+                [
+                    {
+                        "node": "Groq: Generate Executive Pulse",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Groq: Generate Executive Pulse": {
+            "main": [
+                [
+                    {
+                        "node": "Send Email",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    }
+}
