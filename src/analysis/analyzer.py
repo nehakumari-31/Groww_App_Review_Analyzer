@@ -11,7 +11,7 @@ load_dotenv()
 class GrowwAnalyzer:
     def __init__(self):
         self.client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-        self.model = "llama3-70b-8192"
+        self.model = "llama-3.3-70b-versatile"
         self.themes = ["onboarding", "KYC", "payments", "statements", "withdrawals", "others"]
 
     def classify_reviews(self, reviews_df):

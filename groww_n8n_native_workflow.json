@@ -1,5 +1,5 @@
 {
-    "name": "Groww Review Analyzer - Native (Final)",
+    "name": "Groww Review Analyzer - Premium HTML",
     "nodes": [
         {
             "parameters": {
@@ -16,8 +16,8 @@
             "type": "n8n-nodes-base.scheduleTrigger",
             "typeVersion": 1,
             "position": [
-                100,
-                300
+                0,
+                400
             ]
         },
         {
@@ -40,46 +40,59 @@
             "type": "n8n-nodes-base.set",
             "typeVersion": 1,
             "position": [
-                300,
-                300
+                200,
+                400
             ]
         },
         {
             "parameters": {
-                "fileSelector": "/Users/neha/Desktop/Groww_App_Review_Analyzer/data/processed/groww_reviews_processed.csv"
+                "url": "https://raw.githubusercontent.com/nehakumari-31/Groww_App_Review_Analyzer/main/data/processed/groww_reviews_processed.csv",
+                "options": {}
             },
-            "name": "Read Processed Reviews",
-            "type": "n8n-nodes-base.readBinaryFile",
-            "typeVersion": 1,
+            "name": "Fetch Reviews from GitHub",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.1,
             "position": [
-                500,
-                300
+                400,
+                400
             ]
         },
         {
             "parameters": {
-                "options": {
-                    "headerRow": true
-                }
+                "jsCode": "const csv = $json.data || $input.all()[0].json.data || \"\";\nconst lines = csv.split('\\n');\nif (lines.length < 2) return [];\n\nconst header = lines[0].split(',');\nconst results = [];\nconst limit = Math.min(lines.length, 26);\n\nfor (let i = 1; i < limit; i++) {\n  if (!lines[i]) continue;\n  const currentline = lines[i].split(',');\n  const obj = {};\n  for (let j = 0; j < header.length; j++) {\n    obj[header[j].trim()] = (currentline[j] || '').trim();\n  }\n  results.push({ json: obj });\n}\n\nreturn results;"
             },
-            "name": "Extract CSV",
-            "type": "n8n-nodes-base.extractFromFile",
-            "typeVersion": 1,
-            "position": [
-                700,
-                300
-            ]
-        },
-        {
-            "parameters": {
-                "jsCode": "return $input.all().map(item => {\n  const keywords = {\n    onboarding: ['login', 'signup', 'register', 'verification', 'otp'],\n    kyc: ['kyc', 'document', 'pan', 'aadhaar', 'status'],\n    payments: ['deposit', 'add money', 'payment', 'upi', 'bank'],\n    statements: ['statement', 'report', 'ledger', 'history'],\n    withdrawals: ['withdraw', 'payout', 'bank transfer', 'refund']\n  };\n\n  let theme = 'others';\n  const text = (item.json.review_text || '').toLowerCase();\n  for (const [key, list] of Object.entries(keywords)) {\n    if (list.some(word => text.includes(word))) {\n      theme = key;\n      break;\n    }\n  }\n  return { json: { ...item.json, pre_theme: theme } };\n});"
-            },
-            "name": "Keyword Pre-classify",
+            "name": "Parse CSV (Text Mode)",
             "type": "n8n-nodes-base.code",
             "typeVersion": 1,
             "position": [
-                900,
-                300
+                600,
+                400
+            ]
+        },
+        {
+            "parameters": {
+                "mode": "combine",
+                "combinationMode": "multiplex",
+                "options": {}
+            },
+            "name": "Inject Credentials into Every Review",
+            "type": "n8n-nodes-base.merge",
+            "typeVersion": 3,
+            "position": [
+                800,
+                400
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const reviews = $('Parse CSV (Text Mode)').all().map(item => item.json.review_text).join('\\n- ');\nconst credentials = $('Set Credentials').first().json;\n\nconst pulsePayload = {\n  model: \"llama-3.3-70b-versatile\",\n  messages: [\n    {\n      role: \"user\",\n      content: `Analyze these app reviews for 'Groww' and generate a Weekly Executive Pulse Report.\\nReturn ONLY a JSON object with this exact structure:\\n{\\n  \"themes\": [\\n    { \"title\": \"Theme Name\", \"percentage\": \"X%\", \"insight\": \"Short executive insight\" }\\n  ],\\n  \"quotes\": [ { \"text\": \"Short user quote\", \"label\": \"1-star review • 2026-02-20\" } ],\\n  \"actions\": [ { \"title\": \"Action Name\", \"description\": \"Strategic recommendation\" } ]\\n}\\n\\nProvide exactly 3 items for each section.\\n\\nReviews:\\n- ${reviews}`\n    }\n  ],\n  response_format: { type: \"json_object\" }\n};\n\nreturn [{ json: { pulse_payload: pulsePayload, ...credentials } }];"
+            },
+            "name": "Prepare Pulse Payload",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 1,
+            "position": [
+                1000,
+                400
             ]
         },
         {
@@ -91,76 +104,52 @@
                     "parameters": [
                         {
                             "name": "Authorization",
-                            "value": "==Bearer {{$node[\"Set Credentials\"].json[\"GROQ_API_KEY\"]}}"
+                            "value": "={{ \"Bearer \" + $json.GROQ_API_KEY }}"
                         }
                     ]
                 },
                 "sendBody": true,
                 "specifyBody": "json",
-                "jsonBody": "={\n  \"model\": \"llama3-70b-8192\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Classify this app review into exactly ONE theme: onboarding, kyc, payments, statements, withdrawals, others. Review: \\\"{{$json[\"review_text\"]}}\\\". Return ONLY the theme name in lowercase.\"\n    }\n  ],\n  \"temperature\": 0,\n  \"max_tokens\": 10\n}",
+                "jsonBody": "={{ JSON.stringify($json.pulse_payload) }}",
                 "options": {}
             },
-            "name": "Groq: Classify Theme",
+            "name": "Groq: Generate Pulse",
             "type": "n8n-nodes-base.httpRequest",
             "typeVersion": 4.1,
             "position": [
-                1100,
-                300
+                1200,
+                400
             ]
         },
         {
             "parameters": {
-                "jsCode": "const results = $input.all();\nconst reviews = results.map(item => item.json.review_text).join('\\n- ');\nreturn [{ json: { all_reviews: reviews } }];"
+                "jsCode": "const data = JSON.parse($json.choices[0].message.content);\nconst today = new Date().toISOString().split('T')[0];\n\nconst colors = ['#00D09C', '#FFB800', '#FF4D4D'];\n\nconst themeHtml = data.themes.map((t, idx) => `\n  <div style=\"background: #ffffff; border-radius: 12px; padding: 20px; margin-bottom: 20px; border: 1px solid #e5e7eb; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);\">\n    <h3 style=\"margin: 0 0 10px 0; color: #111827; font-size: 18px;\">#${idx + 1} ${t.title}</h3>\n    <div style=\"display: inline-block; background: #e6f9f5; color: #00D09C; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; margin-bottom: 12px;\">${t.percentage} of reviews</div>\n    <p style=\"margin: 0; color: #4B5563; font-style: italic; line-height: 1.5; font-size: 14px;\">${t.insight}</p>\n  </div>\n`).join('');\n\nconst quoteHtml = data.quotes.map(q => `\n  <div style=\"border-left: 4px solid #00D09C; padding: 10px 20px; margin-bottom: 15px; background: #f9fafb;\">\n    <p style=\"margin: 0 0 5px 0; color: #1f2937; font-size: 15px; font-weight: 500;\">\"${q.text}\"</p>\n    <span style=\"color: #6b7280; font-size: 12px;\">${q.label}</span>\n  </div>\n`).join('');\n\nconst actionHtml = data.actions.map(a => `\n  <div style=\"background: #fffbef; border-radius: 8px; padding: 15px; margin-bottom: 10px; border: 1px solid #fef3c7;\">\n    <div style=\"color: #b45309; font-weight: 700; font-size: 12px; text-transform: uppercase; margin-bottom: 5px;\">⚡ ACTION IDEA</div>\n    <p style=\"margin: 0; color: #92400e; font-size: 14px; font-weight: 500;\"><strong>${a.title}</strong> — ${a.description}</p>\n  </div>\n`).join('');\n\nconst finalHtml = `\n<!DOCTYPE html>\n<html>\n<body style=\"font-family: 'Inter', system-ui, -apple-system, sans-serif; background-color: #f3f4f6; padding: 40px 20px;\">\n  <div style=\"max-width: 600px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1);\">\n    <!-- Header -->\n    <div style=\"background: #00D09C; padding: 30px; color: white;\">\n      <h1 style=\"margin: 0; font-size: 28px; font-weight: 800; display: flex; align-items: center;\">\n        📊 Groww Review Pulse\n      </h1>\n      <p style=\"margin: 10px 0 0 0; opacity: 0.9; font-size: 16px;\">Weekly analysis for week of ${today}</p>\n    </div>\n\n    <!-- Stats Bar -->\n    <div style=\"background: #f9fafb; padding: 15px 30px; border-bottom: 1px solid #e5e7eb; display: flex; justify-content: space-between; font-size: 13px; color: #6b7280;\">\n      <span>Reviews Analyzed: <strong>25</strong></span>\n      <span>Tier: <strong>Executive Pulse</strong></span>\n    </div>\n\n    <!-- Main Content -->\n    <div style=\"padding: 30px;\">\n      <h2 style=\"margin: 0 0 25px 0; color: #111827; font-size: 20px; font-weight: 700;\">🎯 Top 3 Themes — with Quotes & Actions</h2>\n      \n      ${themeHtml}\n\n      <h2 style=\"margin: 40px 0 20px 0; color: #111827; font-size: 20px; font-weight: 700;\">🗣️ Critical User Quotes</h2>\n      ${quoteHtml}\n\n      <h2 style=\"margin: 40px 0 20px 0; color: #111827; font-size: 20px; font-weight: 700;\">💡 Actionable Ideas</h2>\n      ${actionHtml}\n\n      <!-- Footer -->\n      <div style=\"margin-top: 50px; padding-top: 30px; border-top: 1px solid #e5e7eb; text-align: center; color: #9ca3af; font-size: 12px;\">\n        Generated automatically for Groww Leadership Team • n8n x Groq AI\n      </div>\n    </div>\n  </div>\n</body>\n</html>\n`;\n\nreturn [{ json: { html: finalHtml } }];"
             },
-            "name": "Aggregate All Reviews",
+            "name": "Generate Premium HTML",
             "type": "n8n-nodes-base.code",
             "typeVersion": 1,
             "position": [
-                1300,
-                300
-            ]
-        },
-        {
-            "parameters": {
-                "method": "POST",
-                "url": "https://api.groq.com/openai/v1/chat/completions",
-                "sendHeaders": true,
-                "headerParameters": {
-                    "parameters": [
-                        {
-                            "name": "Authorization",
-                            "value": "==Bearer {{$node[\"Set Credentials\"].json[\"GROQ_API_KEY\"]}}"
-                        }
-                    ]
-                },
-                "sendBody": true,
-                "specifyBody": "json",
-                "jsonBody": "={\n  \"model\": \"llama3-70b-8192\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Analyze these app reviews for 'Groww' and generate a concise 'Review Pulse' report. Include 3 main themes, 3 critical quotes (anonymized), and 3 actionable ideas. Format your response for a professional executive email.\\n\\nReviews:\\n{{$json[\"all_reviews\"]}}\"\n    }\n  ],\n  \"temperature\": 0.7\n}",
-                "options": {}
-            },
-            "name": "Groq: Generate Executive Pulse",
-            "type": "n8n-nodes-base.httpRequest",
-            "typeVersion": 4.1,
-            "position": [
-                1500,
-                300
+                1400,
+                400
             ]
         },
         {
             "parameters": {
                 "resource": "message",
                 "operation": "send",
-                "to": "={{$node[\"Set Credentials\"].json[\"GMAIL_USER\"]}}",
+                "to": "={{ $('Set Credentials').first().json.GMAIL_USER }}",
                 "subject": "Weekly Groww Review Pulse",
-                "text": "={{$json[\"choices\"][0][\"message\"][\"content\"]}}",
+                "emailType": "html",
+                "text": "Please enable HTML to view this report.",
+                "html": "={{ $json.html }}",
                 "options": {}
             },
-            "name": "Send Email",
+            "name": "Send Premium Email",
             "type": "n8n-nodes-base.gmail",
             "typeVersion": 2.1,
             "position": [
-                1700,
-                300
+                1600,
+                400
             ]
         }
     ],
@@ -180,73 +169,78 @@
             "main": [
                 [
                     {
-                        "node": "Read Processed Reviews",
+                        "node": "Fetch Reviews from GitHub",
+                        "type": "main",
+                        "index": 0
+                    },
+                    {
+                        "node": "Inject Credentials into Every Review",
                         "type": "main",
                         "index": 0
                     }
                 ]
             ]
         },
-        "Read Processed Reviews": {
+        "Fetch Reviews from GitHub": {
             "main": [
                 [
                     {
-                        "node": "Extract CSV",
+                        "node": "Parse CSV (Text Mode)",
                         "type": "main",
                         "index": 0
                     }
                 ]
             ]
         },
-        "Extract CSV": {
+        "Parse CSV (Text Mode)": {
             "main": [
                 [
                     {
-                        "node": "Keyword Pre-classify",
+                        "node": "Inject Credentials into Every Review",
+                        "type": "main",
+                        "index": 1
+                    }
+                ]
+            ]
+        },
+        "Inject Credentials into Every Review": {
+            "main": [
+                [
+                    {
+                        "node": "Prepare Pulse Payload",
                         "type": "main",
                         "index": 0
                     }
                 ]
             ]
         },
-        "Keyword Pre-classify": {
+        "Prepare Pulse Payload": {
             "main": [
                 [
                     {
-                        "node": "Groq: Classify Theme",
+                        "node": "Groq: Generate Pulse",
                         "type": "main",
                         "index": 0
                     }
                 ]
             ]
         },
-        "Groq: Classify Theme": {
+        "Groq: Generate Pulse": {
             "main": [
                 [
                     {
-                        "node": "Aggregate All Reviews",
+                        "node": "Generate Premium HTML",
                         "type": "main",
                         "index": 0
                     }
                 ]
             ]
         },
-        "Aggregate All Reviews": {
+        "Generate Premium HTML": {
             "main": [
                 [
                     {
-                        "node": "Groq: Generate Executive Pulse",
-                        "type": "main",
-                        "index": 0
-                    }
-                ]
-            ]
-        },
-        "Groq: Generate Executive Pulse": {
-            "main": [
-                [
-                    {
-                        "node": "Send Email",
+                        "node": "Send Premium Email",
                         "type": "main",
                         "index": 0
                     }
